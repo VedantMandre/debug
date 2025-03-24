@@ -69,32 +69,6 @@ BEGIN
 
     RAISE NOTICE 'Number of rows updated: %', SQL%ROWCOUNT;
 
-    -- Step 3: Insert new rollovers (where old_reference_number doesn't exist in target)
-    RAISE NOTICE 'Inserting new rollovers...';
-    
-    INSERT INTO deposit.test_recon_time_deposit_rollover (
-        trade_number, reference_number, principal_amount, 
-        maturity_date, currency_code, accrued_interest, 
-        interest_amount, branch_code, funding_source, 
-        obs_number, account_number, settlement_account, 
-        maturity_status, status
-    )
-    SELECT 
-        rod.trade_number, rod.reference_number, rod.principal_amount, 
-        rod.maturity_date, rod.currency_code, rod.accrued_interest, 
-        rod.interest_amount, rod.branch_code, rod.funding_source, 
-        rod.obs_number, rod.account_number, rod.settlement_account, 
-        rod.maturity_status, rod.status
-    FROM rolled_over_data rod
-    WHERE NOT EXISTS (
-        SELECT 1 
-        FROM deposit.test_recon_time_deposit_rollover tdr
-        WHERE TRIM(tdr.reference_number) = rod.reference_number
-    )
-    ON CONFLICT (reference_number) DO NOTHING;
-
-    RAISE NOTICE 'Number of rows inserted: %', SQL%ROWCOUNT;
-
     -- Confirmation Message
     RAISE NOTICE 'Sync completed successfully!';
 EXCEPTION
