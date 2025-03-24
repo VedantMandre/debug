@@ -1,4 +1,38 @@
 ```
+CREATE OR REPLACE PROCEDURE sp_insert_new_rolledover_tds()
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    INSERT INTO deposit.test_recon_time_deposit_rollover (
+        trade_number, reference_number, principal_amount, maturity_date, 
+        currency_code, accrued_interest, interest_amount, branch_code, 
+        funding_source, obs_number, account_number, settlement_account, 
+        maturity_status, status
+    )
+    SELECT 
+        otd.trade_number,
+        otd.old_reference_number,  -- Insert old_reference_number as reference_number
+        otd.time_deposit_amount,
+        otd.maturity_date,
+        otd.currency,
+        otd.interest_accrued_till_date,
+        otd.interest_at_maturity,
+        otd.branch,
+        otd.funding_source,
+        otd.obs_code,
+        otd.time_deposit_account_number,
+        otd.settlement_account_number,
+        otd.maturity_status,
+        'Finalized'  -- Mark newly inserted ones as Finalized
+    FROM deposit.test_recon_obs_time_deposit_data otd
+    LEFT JOIN deposit.test_recon_time_deposit_rollover tdr
+        ON otd.old_reference_number = tdr.reference_number
+    WHERE otd.old_reference_number IS NOT NULL  -- Ensure only rolled-over TDs
+      AND tdr.reference_number IS NULL;  -- Insert only if not already present
+END;
+$$;
+```
+```
 CREATE OR REPLACE PROCEDURE deposit.sync_time_deposit_rollover()
 LANGUAGE plpgsql
 AS $$
