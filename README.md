@@ -2,125 +2,66 @@
 CREATE OR REPLACE PROCEDURE deposit.sync_time_deposit_rollover()
 LANGUAGE plpgsql
 AS $$
+DECLARE
+    v_matched_count INTEGER := 0;
+    v_debug_info TEXT := '';
 BEGIN
-    -- Step 1: Debugging - Check which old_reference_numbers already exist in the rollover table
-    RAISE NOTICE 'Checking existing references...';
-    
-    FOR rec IN 
-        SELECT 
-            TRIM(otd.old_reference_number) AS old_reference_number, 
-            tdr.reference_number
-        FROM deposit.test_recon_obs_time_deposit_data otd
-        LEFT JOIN deposit.test_recon_time_deposit_rollover tdr
-        ON TRIM(otd.old_reference_number) = TRIM(tdr.reference_number)
-        WHERE otd.old_reference_number IS NOT NULL
-        AND tdr.reference_number IS NOT NULL
-    LOOP
-        IF rec.reference_number IS NOT NULL THEN
-            RAISE NOTICE 'Match found: old_reference_number = %, reference_number = %', 
-                         rec.old_reference_number, rec.reference_number;
-        ELSE
-            RAISE NOTICE 'No match: old_reference_number = %', 
-                         rec.old_reference_number;
-        END IF;
-    END LOOP;
+    -- Debugging: Log initial state
+    RAISE NOTICE 'Starting time deposit rollover synchronization...';
 
-    -- Step 2: Update existing records where old_reference_number matches reference_number
-    RAISE NOTICE 'Updating existing matched records...';
-    
-    WITH rolled_over_data AS (
+    -- Step 1: Update existing matched records
+    WITH matched_records AS (
         SELECT 
-            otd.trade_number, 
-            TRIM(otd.old_reference_number) AS reference_number,  
-            otd.time_deposit_amount AS principal_amount, 
-            otd.maturity_date, 
-            otd.currency AS currency_code, 
-            otd.interest_accrued_till_date AS accrued_interest, 
-            otd.interest_at_maturity AS interest_amount, 
-            otd.branch AS branch_code, 
-            otd.funding_source, 
-            otd.obs_code AS obs_number, 
-            otd.time_deposit_account_number AS account_number, 
-            otd.settlement_account_number AS settlement_account, 
-            otd.maturity_status, 
-            'Finalized' AS status
+            otd.trade_number AS new_trade_number,
+            otd.old_reference_number AS matched_reference_number,
+            otd.time_deposit_amount AS new_principal_amount,
+            otd.maturity_date AS new_maturity_date,
+            otd.currency AS new_currency_code,
+            otd.interest_accrued_till_date AS new_accrued_interest,
+            otd.interest_at_maturity AS new_interest_amount,
+            otd.branch AS new_branch_code,
+            otd.funding_source AS new_funding_source,
+            otd.obs_code AS new_obs_number,
+            otd.time_deposit_account_number AS new_account_number,
+            otd.settlement_account_number AS new_settlement_account,
+            otd.maturity_status AS new_maturity_status
         FROM deposit.test_recon_obs_time_deposit_data otd
+        INNER JOIN deposit.test_recon_time_deposit_rollover tdr
+            ON otd.old_reference_number = tdr.reference_number
         WHERE otd.old_reference_number IS NOT NULL
     )
-    
     UPDATE deposit.test_recon_time_deposit_rollover tdr
     SET 
-        trade_number = rod.trade_number,
-        principal_amount = rod.principal_amount,
-        maturity_date = rod.maturity_date,
-        currency_code = rod.currency_code,
-        accrued_interest = rod.accrued_interest,
-        interest_amount = rod.interest_amount,
-        branch_code = rod.branch_code,
-        funding_source = rod.funding_source,
-        obs_number = rod.obs_number,
-        account_number = rod.account_number,
-        settlement_account = rod.settlement_account,
-        maturity_status = rod.maturity_status,
+        trade_number = mr.new_trade_number,
+        principal_amount = mr.new_principal_amount,
+        maturity_date = mr.new_maturity_date,
+        currency_code = mr.new_currency_code,
+        accrued_interest = mr.new_accrued_interest,
+        interest_amount = mr.new_interest_amount,
+        branch_code = mr.new_branch_code,
+        funding_source = mr.new_funding_source,
+        obs_number = mr.new_obs_number,
+        account_number = mr.new_account_number,
+        settlement_account = mr.new_settlement_account,
+        maturity_status = mr.new_maturity_status,
         status = 'Finalized'
-    FROM rolled_over_data rod
-    WHERE TRIM(tdr.reference_number) = rod.reference_number
-    AND tdr.reference_number IS NOT NULL;
+    FROM matched_records mr
+    WHERE tdr.reference_number = mr.matched_reference_number;
 
-    RAISE NOTICE 'Number of rows updated: %', SQL%ROWCOUNT;
+    -- Get count of matched and updated records
+    GET DIAGNOSTICS v_matched_count = ROW_COUNT;
 
-    -- Step 3: Insert new rollovers (where old_reference_number doesn't exist in target)
-    RAISE NOTICE 'Inserting new rollovers...';
-    
-    WITH rolled_over_data AS (
-        SELECT 
-            otd.trade_number, 
-            TRIM(otd.old_reference_number) AS reference_number,  
-            otd.time_deposit_amount AS principal_amount, 
-            otd.maturity_date, 
-            otd.currency AS currency_code, 
-            otd.interest_accrued_till_date AS accrued_interest, 
-            otd.interest_at_maturity AS interest_amount, 
-            otd.branch AS branch_code, 
-            otd.funding_source, 
-            otd.obs_code AS obs_number, 
-            otd.time_deposit_account_number AS account_number, 
-            otd.settlement_account_number AS settlement_account, 
-            otd.maturity_status, 
-            'Finalized' AS status
-        FROM deposit.test_recon_obs_time_deposit_data otd
-        WHERE otd.old_reference_number IS NOT NULL
-    )
-    
-    INSERT INTO deposit.test_recon_time_deposit_rollover (
-        trade_number, reference_number, principal_amount, 
-        maturity_date, currency_code, accrued_interest, 
-        interest_amount, branch_code, funding_source, 
-        obs_number, account_number, settlement_account, 
-        maturity_status, status
-    )
-    SELECT 
-        rod.trade_number, rod.reference_number, rod.principal_amount, 
-        rod.maturity_date, rod.currency_code, rod.accrued_interest, 
-        rod.interest_amount, rod.branch_code, rod.funding_source, 
-        rod.obs_number, rod.account_number, rod.settlement_account, 
-        rod.maturity_status, rod.status
-    FROM rolled_over_data rod
-    WHERE rod.reference_number IS NOT NULL  -- Ensure no NULL reference_number values are inserted
-    AND NOT EXISTS (
-        SELECT 1 
-        FROM deposit.test_recon_time_deposit_rollover tdr
-        WHERE TRIM(tdr.reference_number) = rod.reference_number
+    -- Step 2: Prepare debug information
+    v_debug_info := format(
+        'Synchronization Summary: %s records matched and updated', 
+        v_matched_count
     );
 
-    RAISE NOTICE 'Number of rows inserted: %', SQL%ROWCOUNT;
+    -- Log debug information
+    RAISE NOTICE '%', v_debug_info;
 
     -- Confirmation Message
-    RAISE NOTICE 'Sync completed successfully!';
-EXCEPTION
-    WHEN OTHERS THEN
-        RAISE NOTICE 'Error occurred: %', SQLERRM;
-        RAISE;
+    RAISE NOTICE 'Time deposit rollover synchronization completed successfully!';
 END;
 $$;
 ```
