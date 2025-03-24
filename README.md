@@ -69,6 +69,52 @@ BEGIN
 
     RAISE NOTICE 'Number of rows updated: %', SQL%ROWCOUNT;
 
+    -- Step 3: Insert new rollovers (where old_reference_number doesn't exist in target)
+    RAISE NOTICE 'Inserting new rollovers...';
+    
+    WITH rolled_over_data AS (
+        SELECT 
+            otd.trade_number, 
+            TRIM(otd.old_reference_number) AS reference_number,  
+            otd.time_deposit_amount AS principal_amount, 
+            otd.maturity_date, 
+            otd.currency AS currency_code, 
+            otd.interest_accrued_till_date AS accrued_interest, 
+            otd.interest_at_maturity AS interest_amount, 
+            otd.branch AS branch_code, 
+            otd.funding_source, 
+            otd.obs_code AS obs_number, 
+            otd.time_deposit_account_number AS account_number, 
+            otd.settlement_account_number AS settlement_account, 
+            otd.maturity_status, 
+            'Finalized' AS status
+        FROM deposit.test_recon_obs_time_deposit_data otd
+        WHERE otd.old_reference_number IS NOT NULL
+    )
+    
+    INSERT INTO deposit.test_recon_time_deposit_rollover (
+        trade_number, reference_number, principal_amount, 
+        maturity_date, currency_code, accrued_interest, 
+        interest_amount, branch_code, funding_source, 
+        obs_number, account_number, settlement_account, 
+        maturity_status, status
+    )
+    SELECT 
+        rod.trade_number, rod.reference_number, rod.principal_amount, 
+        rod.maturity_date, rod.currency_code, rod.accrued_interest, 
+        rod.interest_amount, rod.branch_code, rod.funding_source, 
+        rod.obs_number, rod.account_number, rod.settlement_account, 
+        rod.maturity_status, rod.status
+    FROM rolled_over_data rod
+    WHERE rod.reference_number IS NOT NULL  -- Ensure no NULL reference_number values are inserted
+    AND NOT EXISTS (
+        SELECT 1 
+        FROM deposit.test_recon_time_deposit_rollover tdr
+        WHERE TRIM(tdr.reference_number) = rod.reference_number
+    );
+
+    RAISE NOTICE 'Number of rows inserted: %', SQL%ROWCOUNT;
+
     -- Confirmation Message
     RAISE NOTICE 'Sync completed successfully!';
 EXCEPTION
