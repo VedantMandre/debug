@@ -6,7 +6,7 @@ DECLARE
     v_inserted_count INTEGER := 0;
     v_updated_count INTEGER := 0;
 BEGIN
-    -- Step 1: Update existing matched records
+    -- Step 1: Update existing matched records with strict filtering
     WITH matched_records AS (
         SELECT 
             otd.trade_number AS new_trade_number,
@@ -26,6 +26,7 @@ BEGIN
         INNER JOIN deposit.test_recon_time_deposit_rollover tdr
             ON otd.old_reference_number = tdr.reference_number
         WHERE otd.old_reference_number IS NOT NULL
+          AND otd.old_reference_number != ''
     )
     UPDATE deposit.test_recon_time_deposit_rollover tdr
     SET 
@@ -47,7 +48,7 @@ BEGIN
 
     GET DIAGNOSTICS v_updated_count = ROW_COUNT;
 
-    -- Step 2: Insert only rows with non-null old_reference_number
+    -- Step 2: Insert only rows with non-null and non-empty old_reference_number
     WITH new_rollover_records AS (
         SELECT 
             otd.trade_number, 
@@ -68,6 +69,7 @@ BEGIN
         LEFT JOIN deposit.test_recon_time_deposit_rollover tdr
             ON otd.old_reference_number = tdr.reference_number
         WHERE otd.old_reference_number IS NOT NULL
+          AND otd.old_reference_number != ''
           AND tdr.reference_number IS NULL
     )
     INSERT INTO deposit.test_recon_time_deposit_rollover (
