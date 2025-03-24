@@ -1,8 +1,27 @@
 ```
+CREATE TABLE deposit.staging_rolledover_tds AS
+SELECT *
+FROM deposit.test_recon_obs_time_deposit_data
+WHERE 1=0;  -- Structure-only copy
+```
+```
 CREATE OR REPLACE PROCEDURE sp_insert_new_rolledover_tds()
 LANGUAGE plpgsql
 AS $$
 BEGIN
+    -- Step 1: Load only new rolled-over TDs into staging
+    TRUNCATE TABLE deposit.staging_rolledover_tds;
+    
+    INSERT INTO deposit.staging_rolledover_tds
+    SELECT * 
+    FROM deposit.test_recon_obs_time_deposit_data otd
+    WHERE otd.old_reference_number IS NOT NULL
+    AND NOT EXISTS (
+        SELECT 1 FROM deposit.test_recon_time_deposit_rollover tdr
+        WHERE tdr.reference_number = otd.old_reference_number
+    );
+
+    -- Step 2: Insert from staging into main table
     INSERT INTO deposit.test_recon_time_deposit_rollover (
         trade_number, reference_number, principal_amount, maturity_date, 
         currency_code, accrued_interest, interest_amount, branch_code, 
@@ -10,28 +29,25 @@ BEGIN
         maturity_status, status
     )
     SELECT 
-        otd.trade_number,
-        otd.old_reference_number,  -- Use old_reference_number as reference_number
-        otd.time_deposit_amount,
-        otd.maturity_date,
-        otd.currency,
-        otd.interest_accrued_till_date,
-        otd.interest_at_maturity,
-        otd.branch,
-        otd.funding_source,
-        otd.obs_code,
-        otd.time_deposit_account_number,
-        otd.settlement_account_number,
-        otd.maturity_status,
+        trade_number,
+        old_reference_number,  -- Use old_reference_number as reference_number
+        time_deposit_amount,
+        maturity_date,
+        currency,
+        interest_accrued_till_date,
+        interest_at_maturity,
+        branch,
+        funding_source,
+        obs_code,
+        time_deposit_account_number,
+        settlement_account_number,
+        maturity_status,
         'Finalized'  -- Mark newly inserted ones as Finalized
-    FROM deposit.test_recon_obs_time_deposit_data otd
-    WHERE otd.old_reference_number IS NOT NULL  -- Ensure only rolled-over TDs
-    AND NOT EXISTS (
-        SELECT 1 FROM deposit.test_recon_time_deposit_rollover tdr
-        WHERE tdr.reference_number = otd.old_reference_number
-    );  -- Insert only if not already present
+    FROM deposit.staging_rolledover_tds;
+
 END;
 $$;
+
 ```
 ```
 CREATE OR REPLACE PROCEDURE deposit.sync_time_deposit_rollover()
