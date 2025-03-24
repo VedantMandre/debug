@@ -79,6 +79,14 @@ END;
 $$;
 ```
 ```
+SELECT 
+    COUNT(*) AS total_rows,
+    COUNT(DISTINCT reference_number) AS unique_reference_numbers,
+    COUNT(*) FILTER (WHERE reference_number IS NULL) AS null_reference_numbers,
+    COUNT(*) FILTER (WHERE status = 'Finalized') AS updated_rows
+FROM deposit.test_recon_time_deposit_rollover;
+```
+```
 CREATE OR REPLACE PROCEDURE deposit.sync_time_deposit_rollover()
 LANGUAGE plpgsql
 AS $$
