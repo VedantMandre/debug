@@ -11,7 +11,7 @@ BEGIN
     )
     SELECT 
         otd.trade_number,
-        otd.old_reference_number,  -- Insert old_reference_number as reference_number
+        otd.old_reference_number,  -- Use old_reference_number as reference_number
         otd.time_deposit_amount,
         otd.maturity_date,
         otd.currency,
@@ -25,10 +25,11 @@ BEGIN
         otd.maturity_status,
         'Finalized'  -- Mark newly inserted ones as Finalized
     FROM deposit.test_recon_obs_time_deposit_data otd
-    LEFT JOIN deposit.test_recon_time_deposit_rollover tdr
-        ON otd.old_reference_number = tdr.reference_number
     WHERE otd.old_reference_number IS NOT NULL  -- Ensure only rolled-over TDs
-      AND tdr.reference_number IS NULL;  -- Insert only if not already present
+    AND NOT EXISTS (
+        SELECT 1 FROM deposit.test_recon_time_deposit_rollover tdr
+        WHERE tdr.reference_number = otd.old_reference_number
+    );  -- Insert only if not already present
 END;
 $$;
 ```
