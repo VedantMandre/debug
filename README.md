@@ -3,12 +3,9 @@ CREATE OR REPLACE PROCEDURE deposit.sync_time_deposit_rollover()
 LANGUAGE plpgsql
 AS $$
 DECLARE
-    v_matched_count INTEGER := 0;
-    v_debug_info TEXT := '';
+    v_inserted_count INTEGER := 0;
+    v_updated_count INTEGER := 0;
 BEGIN
-    -- Debugging: Log initial state
-    RAISE NOTICE 'Starting time deposit rollover synchronization...';
-
     -- Step 1: Update existing matched records
     WITH matched_records AS (
         SELECT 
@@ -48,19 +45,52 @@ BEGIN
     FROM matched_records mr
     WHERE tdr.reference_number = mr.matched_reference_number;
 
-    -- Get count of matched and updated records
-    GET DIAGNOSTICS v_matched_count = ROW_COUNT;
+    GET DIAGNOSTICS v_updated_count = ROW_COUNT;
 
-    -- Step 2: Prepare debug information
-    v_debug_info := format(
-        'Synchronization Summary: %s records matched and updated', 
-        v_matched_count
-    );
+    -- Step 2: Insert only rows with non-null old_reference_number
+    WITH new_rollover_records AS (
+        SELECT 
+            otd.trade_number, 
+            otd.old_reference_number AS reference_number,  
+            otd.time_deposit_amount AS principal_amount, 
+            otd.maturity_date, 
+            otd.currency AS currency_code, 
+            otd.interest_accrued_till_date AS accrued_interest, 
+            otd.interest_at_maturity AS interest_amount, 
+            otd.branch AS branch_code, 
+            otd.funding_source, 
+            otd.obs_code AS obs_number, 
+            otd.time_deposit_account_number AS account_number, 
+            otd.settlement_account_number AS settlement_account, 
+            otd.maturity_status, 
+            'Finalized' AS status
+        FROM deposit.test_recon_obs_time_deposit_data otd
+        LEFT JOIN deposit.test_recon_time_deposit_rollover tdr
+            ON otd.old_reference_number = tdr.reference_number
+        WHERE otd.old_reference_number IS NOT NULL
+          AND tdr.reference_number IS NULL
+    )
+    INSERT INTO deposit.test_recon_time_deposit_rollover (
+        trade_number, reference_number, principal_amount, 
+        maturity_date, currency_code, accrued_interest, 
+        interest_amount, branch_code, funding_source, 
+        obs_number, account_number, settlement_account, 
+        maturity_status, status
+    )
+    SELECT 
+        trade_number, reference_number, principal_amount, 
+        maturity_date, currency_code, accrued_interest, 
+        interest_amount, branch_code, funding_source, 
+        obs_number, account_number, settlement_account, 
+        maturity_status, status
+    FROM new_rollover_records;
 
-    -- Log debug information
-    RAISE NOTICE '%', v_debug_info;
+    GET DIAGNOSTICS v_inserted_count = ROW_COUNT;
 
-    -- Confirmation Message
+    -- Logging
+    RAISE NOTICE 'Synchronization Summary:';
+    RAISE NOTICE 'Updated Records: %', v_updated_count;
+    RAISE NOTICE 'Inserted Records: %', v_inserted_count;
     RAISE NOTICE 'Time deposit rollover synchronization completed successfully!';
 END;
 $$;
