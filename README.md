@@ -2,6 +2,71 @@
 CREATE OR REPLACE PROCEDURE deposit.sync_time_deposit_rollover()
 LANGUAGE plpgsql
 AS $$
+BEGIN
+    -- Step 1: Update existing records where old_reference_number matches reference_number
+    UPDATE deposit.test_recon_time_deposit_rollover tdr
+    SET 
+        trade_number = otd.trade_number,
+        principal_amount = otd.time_deposit_amount,
+        maturity_date = otd.maturity_date,
+        currency_code = otd.currency,
+        accrued_interest = otd.interest_accrued_till_date,
+        interest_amount = otd.interest_at_maturity,
+        branch_code = otd.branch,
+        funding_source = otd.funding_source,
+        obs_number = otd.obs_code,
+        account_number = otd.time_deposit_account_number,
+        settlement_account = otd.settlement_account_number,
+        maturity_status = otd.maturity_status,
+        status = 'Finalized'
+    FROM deposit.test_recon_obs_time_deposit_data otd
+    WHERE TRIM(otd.old_reference_number) = TRIM(tdr.reference_number)
+    AND otd.old_reference_number IS NOT NULL
+    AND tdr.reference_number IS NOT NULL;
+
+    -- Step 2: Insert new rollovers (where old_reference_number doesn't exist in target)
+    INSERT INTO deposit.test_recon_time_deposit_rollover (
+        trade_number, reference_number, principal_amount, 
+        maturity_date, currency_code, accrued_interest, 
+        interest_amount, branch_code, funding_source, 
+        obs_number, account_number, settlement_account, 
+        maturity_status, status
+    )
+    SELECT 
+        otd.trade_number,
+        TRIM(otd.old_reference_number),
+        otd.time_deposit_amount,
+        otd.maturity_date,
+        otd.currency,
+        otd.interest_accrued_till_date,
+        otd.interest_at_maturity,
+        otd.branch,
+        otd.funding_source,
+        otd.obs_code,
+        otd.time_deposit_account_number,
+        otd.settlement_account_number,
+        otd.maturity_status,
+        'Finalized'
+    FROM deposit.test_recon_obs_time_deposit_data otd
+    LEFT JOIN deposit.test_recon_time_deposit_rollover tdr
+        ON TRIM(otd.old_reference_number) = TRIM(tdr.reference_number)
+    WHERE otd.old_reference_number IS NOT NULL
+        AND tdr.reference_number IS NULL;
+
+    -- Commit the changes
+    COMMIT;
+EXCEPTION
+    WHEN OTHERS THEN
+        -- Roll back on error
+        ROLLBACK;
+        RAISE EXCEPTION 'Error occurred: %', SQLERRM;
+END;
+$$;
+```
+```
+CREATE OR REPLACE PROCEDURE deposit.sync_time_deposit_rollover()
+LANGUAGE plpgsql
+AS $$
 DECLARE
     v_inserted_count INTEGER := 0;
     v_updated_count INTEGER := 0;
